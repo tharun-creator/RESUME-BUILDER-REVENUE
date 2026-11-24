@@ -1,0 +1,26 @@
+{
+  "name": "ats-resume-score-checker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ATS Resume Score Checker - India-first MVP",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "npm run -ws --if-present lint",
+    "typecheck": "npm run -ws --if-present typecheck",
+    "test": "npm run -ws --if-present test",
+    "build": "npm run -ws --if-present build",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "dev": "npm run -ws --if-present dev"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
