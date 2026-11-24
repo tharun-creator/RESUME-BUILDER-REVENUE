@@ -1,0 +1,75 @@
+# docker-compose.yml — LOCAL DEVELOPMENT ONLY (non-production defaults)
+# Owner: Security/DevOps agent (task T-S1). Source of truth: docs/PRD.md.
+#
+# Services: PostgreSQL, Redis, MinIO (S3-compatible storage) per PRD §8.
+# Secrets are read from the root .env file. Placeholders are documented in
+# .env.example (owned by task T-R1) — this file never contains real secrets.
+# The default values below are obvious local-dev placeholders ONLY; override
+# every one of them via .env before using them anywhere outside localhost.
+
+name: ats-resume-score-checker
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ats_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-only}
+      POSTGRES_DB: ${POSTGRES_DB:-ats_dev}
+    ports:
+      # Host port 5433 so it does not clash with a locally installed Postgres.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-ats_dev} -d $${POSTGRES_DB:-ats_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF persistence keeps rate-limit/queue state across restarts (PRD §8:
+    # Redis holds rate limits, cache, queue and sessions).
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Host port 6380 so it does not clash with a locally installed Redis.
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    # S3-compatible object storage for resume uploads (PRD §8: private,
+    # encrypted bucket with signed URLs). Local dev stand-in for S3/R2.
+    image: minio/minio:latest # TODO(wave 2): pin an exact release tag
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin-dev}
+    ports:
+      - "${S3_PORT:-9000}:9000" # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001" # Dev console (browser)
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

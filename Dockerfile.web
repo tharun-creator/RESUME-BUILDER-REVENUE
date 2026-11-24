@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+# Web image (apps/web, Next.js) — Multi-stage, non-root, production deps only.
+# Owner: Security/DevOps agent (task T-S1). Build context: REPO ROOT.
+#
+#   docker build -f Dockerfile.web -t ats-web .
+#
+# Location note: intended as apps/web/Dockerfile, but the apps/** write guard
+# blocked it; PLAN.md assigns `Dockerfile*` to T-S1, so it lives at the root.
+#
+# NOTE (wave 1): apps/web does not exist yet — written against the planned
+# structure in docs/PLAN.md (T-U1/U2); the image build is verified in wave 2.
+# ============================================================================
+
+########## Stage 1: full workspace dependencies (needed to build) ############
+FROM node:22-alpine AS build
+WORKDIR /app
+
+# npm ci in a workspace needs every workspace manifest present.
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci
+
+# Source + shared types (packages/shared feeds the API types).
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY apps/web apps/web
+RUN npm run build --workspace apps/web
+
+########## Stage 2: production-only dependencies ##############################
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci --omit=dev
+
+########## Stage 3: minimal runtime image, runs as non-root ##################
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Production node_modules only (no compilers, no dev tooling).
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/apps/web/node_modules ./apps/web/node_modules
+# Next.js runtime needs build output, config, public assets and manifests.
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/packages/shared ./packages/shared
+COPY --from=build --chown=node:node /app/apps/web/.next ./apps/web/.next
+COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
+COPY --from=build --chown=node:node /app/apps/web/next.config.* ./apps/web/
+COPY --from=build --chown=node:node /app/apps/web/package.json ./apps/web/package.json
+
+USER node
+EXPOSE 3000
+CMD ["npm", "run", "start", "--workspace", "apps/web"]
