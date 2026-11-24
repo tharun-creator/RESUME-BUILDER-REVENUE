@@ -4,35 +4,43 @@
 
 ## Done
 
-- `docs/PRD.md` — source of truth created (from `PRD ATS Resume Score Checker.md`).
-- `docs/AGENTS.md` — agent prompts + compliance rules created (from `Agent Prompts ATS Resume Score Checker.md`).
-- `docs/PLAN.md` — milestones, task cards, dependencies, decisions.
-- This file.
+- `docs/PRD.md`, `docs/AGENTS.md`, `docs/PLAN.md` created and committed.
+- Root scaffold: `package.json` (workspaces), `tsconfig.base.json`, eslint/prettier, `.gitignore`, `.env.example`, `README.md`.
+- Security baseline: `docs/SECURITY.md` (threat model + pre-launch checklist).
+- Draft contracts: `docs/API.md`, `docs/DB.md` (from wave-1 scribe output; manager review pending).
+- Infra: `docker-compose.yml` (Postgres/Redis/MinIO), Dockerfiles for web/api/worker, CI workflow.
+- MVP code skeleton (manager takeover after wave-1 subagents hit provider free-usage limit):
+  - `packages/shared`: zod schemas/types, PRD §5 plan seed.
+  - `apps/api`: Express API (health, plans, OTP auth dev-fallback, upload, scan create/poll/report, dashboard, checkout, payment verify HMAC, webhook stub), in-memory store, rule-based scoring engine, PDF/DOCX extraction.
+  - `apps/worker`: placeholder (MVP processing runs in-process in API; BullMQ move is Phase 2).
+  - `apps/web`: Next.js+Tailwind app (landing, pricing from API, auth OTP, upload+poll, report, dashboard, dev checkout verify), one accent color, responsive layout.
 
-## In progress (wave 1, 4 agents)
+## In progress
 
-| Task | Agent | Status |
-| --- | --- | --- |
-| T-M1 `docs/API.md` + `docs/DB.md` | developer (scribe) | in progress |
-| T-S1 compose + Dockerfiles + CI + `docs/SECURITY.md` | devops | in progress |
-| T-U1 `apps/web` foundation with mocked API | designer | in progress |
-| T-R1 root monorepo scaffold | general | in progress |
+- Manager review of API/DB draft contracts for PRD alignment.
+- Wiring/verification: `npm install`, lint/typecheck/test/build (not run in this session; deps not installed).
+- E2E manual smoke run with local env.
 
-## Blocked
+## Blocked / needs input
 
-- Wave 2 (T-B1 backend, T-U2 UI wiring, T-S2 hardening, T-Q1 QA): waiting for T-M1 manager review + T-R1.
+- Live keys for full flow: `RAZORPAY_*`, `CLAUDE_API_KEY`, `RESEND_API_KEY`, Google OAuth. Dev fallbacks exist for OTP and dev checkout; Razorpay/Claude need keys or explicit mocks for live integration.
+- AI model tiers and retention default still open (PRD §17.2/§17.3) — recorded in PLAN.
 
-## Known issues (from `docs/AGENTS.md` §9)
+## Known issues
 
-1. OpenCode plugins failing: `ecc-hooks.ts` and `index.ts` under the opencode plugins folder ("2 plugins failed"). Needs `/plugins` inspection.
-2. `perplexity` MCP server failing: `PERPLEXITY_API_KEY` is not set in the environment. Fix: provide the key or disable the server so agents stop retrying it.
-3. `bash` maps to WSL with no distro installed → all agents use Git Bash or PowerShell (already in Shared Rules).
+1. Wave-1 background subagents (T-M1/T-S1/T-U1/T-R1) all failed with "Free usage limit reached" — manager took over and completed deliverables directly. Quality review still needed.
+2. `perplexity` MCP env key missing (`PERPLEXITY_API_KEY` not set). Not blocking.
+3. `bash` maps to WSL with no distro installed on this machine — use Git Bash/PowerShell.
+4. `npm install` / lint / typecheck / tests / build not executed here (no dependency install performed). Reported as unverified.
+5. API uses in-memory store for MVP; Postgres/Redis/BullMQ wiring is Phase 2 hardening.
+6. PDF download button intentionally disabled (Phase 2 per PLAN §6).
 
 ## Decisions
 
-- Express (framework), Resend (email), prepaid packs v1 (no subscriptions), MinIO for local S3-compatible storage.
-- See `docs/PLAN.md` §4 for open decisions (AI model tiers, retention default, storage provider).
+- Express for API; Resend for email; prepaid packs v1.
+- Dev fallback: OTP logged to API console when `RESEND_API_KEY` missing; dev checkout verify accepted when Razorpay secret is placeholder and `NODE_ENV!=production`.
+- Scoring is deterministic rule+heuristic in MVP; Claude integration gated by `CLAUDE_API_KEY` (to be wired in T-B1 hardening).
 
 ## Rule violations / rejections
 
-- None yet.
+- None recorded. Subagent failures were provider-limit errors, not rule violations.
