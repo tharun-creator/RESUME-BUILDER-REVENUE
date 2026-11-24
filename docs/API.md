@@ -58,10 +58,10 @@ Implemented with Redis (sliding window / token bucket) plus Cloudflare edge rule
 | General API | 100 requests per minute per IP |
 | Webhook endpoint | Allow only Razorpay signatures, no user limits |
 
-**429 behaviour (PRD §11, mandatory):** any limit violation returns **HTTP 429** with a **`Retry-After`** header (seconds until the window resets) and a friendly message. The UI must show a retry timer (UI-UX acceptance: "429 rate-limit states (friendly retry timer)"). Response body:
+**429 behaviour (PRD §11, mandatory):** any limit violation returns **HTTP 429** with a **`Retry-After`** header (seconds until the window resets) and a friendly message. The UI must show a retry timer (UI-UX acceptance: "429 rate-limit states (friendly retry timer)"). Response body (values below are illustrative format examples, not limits):
 
 ```json
-{ "error": { "code": "rate_limited", "message": "Too many attempts. Please try again after the time shown.", "details": { "limit": "otp_request_email", "retry_after_seconds": 420 } } }
+{ "error": { "code": "rate_limited", "message": "Too many attempts. Please try again after the time shown.", "details": { "limit": "otp_request_email", "retry_after_seconds": 300 } } }
 ```
 
 `details.limit` names which §11 rule fired `[PROPOSAL]`. Any endpoint not listed above falls under **General API (100/min per IP)**. The scan/upload plan limits are selected from the user's current plan read from the `plans` table (never hardcoded).
@@ -216,7 +216,7 @@ Implemented with Redis (sliding window / token bucket) plus Cloudflare edge rule
   "upload_url": "https://storage.example/... (pre-signed PUT, expires in minutes)",
   "file_key": "uploads/<user_id>/<uuid>.pdf",
   "headers": { "Content-Type": "application/pdf" },
-  "expires_in_seconds": 300
+  "expires_in_seconds": "<config — signed URL TTL, minutes per PRD §12>"
 }
 ```
 
@@ -319,7 +319,7 @@ When `status = "done"`: `score` is a number 0–100. When `failed`: `error_code`
     "keyword_gap": [ { "keyword": "...", "where_to_add": "..." } ],
     "bullet_rewrites": [ { "before": "...", "after": "..." } ]
   },
-  "entitlements": { "locked_sections": ["job_description_matching", "cover_letter"], "keyword_gap_limit": 3 },
+  "entitlements": { "locked_sections": ["job_description_matching", "cover_letter"], "keyword_gap_limit": "<from plans.features_json>" },
   "credits_remaining": 9
 }
 ```
@@ -346,29 +346,26 @@ Sub-score weights are PRD §7.3 (25/15/25/20/15) and are computed in code, never
 - **Rate limit:** General API
 - **Purpose:** pricing page. **All plan data comes from the `plans` table — never hardcoded in the UI** (Shared Rules, UI-UX rules).
 
-**Response 200**
+**Response 200** (structure only — **every price/limit value below is read at runtime from the `plans` table**, seeded from PRD §5; no literal values are duplicated here):
 
 ```json
 {
   "plans": [
     {
       "id": "uuid", "slug": "free", "name": "Free",
-      "price_paise": 0, "currency": "INR",
-      "validity_days": null, "scans": 1,
-      "features": { "ats_score": true, "section_breakdown": false, "keyword_gap": "top_3",
-                    "job_description_matching": false, "ai_bullet_rewrites": false,
-                    "cover_letter": false, "linkedin_tips": false, "pdf_download": false,
-                    "email_report": false, "priority_processing": false },
+      "price_paise": "<plans.price_paise>", "currency": "INR",
+      "validity_days": "<plans.validity_days>", "scans": "<plans.scans>",
+      "features": "<plans.features_json — PRD §5 feature matrix>",
       "badge": null
     },
-    { "slug": "starter", "name": "Starter", "price_paise": 5000, "currency": "INR", "validity_days": 7, "scans": 1, "features": { "...": "PRD §5" }, "badge": null },
-    { "slug": "pro", "name": "Pro", "price_paise": 29900, "currency": "INR", "validity_days": 30, "scans": 10, "features": { "...": "PRD §5" }, "badge": "best_value" },
-    { "slug": "premium", "name": "Premium", "price_paise": 59900, "currency": "INR", "validity_days": 30, "scans": 30, "features": { "...": "PRD §5" }, "badge": null }
+    { "id": "uuid", "slug": "starter", "name": "Starter", "price_paise": "<plans.price_paise>", "currency": "INR", "validity_days": "<plans.validity_days>", "scans": "<plans.scans>", "features": "<plans.features_json>", "badge": null },
+    { "id": "uuid", "slug": "pro", "name": "Pro", "price_paise": "<plans.price_paise>", "currency": "INR", "validity_days": "<plans.validity_days>", "scans": "<plans.scans>", "features": "<plans.features_json>", "badge": "best_value" },
+    { "id": "uuid", "slug": "premium", "name": "Premium", "price_paise": "<plans.price_paise>", "currency": "INR", "validity_days": "<plans.validity_days>", "scans": "<plans.scans>", "features": "<plans.features_json>", "badge": null }
   ]
 }
 ```
 
-Prices above are **row values seeded from PRD §5** (GST-inclusive, PRD §5) shown here only as documentation of the seed — the API reads them from the table. `badge` = "Best value" on Pro (PRD §5 pricing note) `[PROPOSAL: badge column]`. **Errors:** `429 rate_limited`, `500`.
+All prices are GST-inclusive (PRD §5). `badge` = "Best value" on Pro (PRD §5 pricing note) `[PROPOSAL: badge column]`. **Errors:** `429 rate_limited`, `500`.
 
 ---
 
@@ -394,7 +391,7 @@ Prices above are **row values seeded from PRD §5** (GST-inclusive, PRD §5) sho
     "id": "uuid",
     "razorpay_order_id": "order_xxxxx",
     "plan_id": "uuid",
-    "amount_paise": 29900,
+    "amount_paise": "<server-side lookup of plans.price_paise — never from the browser>",
     "currency": "INR",
     "razorpay_key_id": "<public key id — the only key allowed in the frontend>"
   }
@@ -444,7 +441,7 @@ Order saved with status `created` (PRD §10.2). **Errors:** `404 plan_not_found`
   "id": "evt_xxxxx",
   "entity": "event",
   "event": "payment.captured",
-  "payload": { "payment": { "entity": { "id": "pay_xxxxx", "order_id": "order_xxxxx", "amount": 29900, "status": "captured" } } }
+  "payload": { "payment": { "entity": { "id": "pay_xxxxx", "order_id": "order_xxxxx", "amount": "<paise>", "status": "captured" } } }
 }
 ```
 
@@ -469,7 +466,7 @@ Order saved with status `created` (PRD §10.2). **Errors:** `404 plan_not_found`
   "plan": { "id": "uuid", "name": "Pro" },
   "remaining": 9,
   "expires_at": "2026-12-24T00:00:00Z",
-  "free_daily": { "used": 0, "limit": 1, "resets_at": "2026-11-25T00:00:00Z" }
+  "free_daily": { "used": 0, "limit": "<from PRD §11 free-tier config>", "resets_at": "2026-11-25T00:00:00Z" }
 }
 ```
 
@@ -542,7 +539,7 @@ All admin endpoints: **Auth: admin** `[PROPOSAL — role mechanism unspecified i
 #### `GET /api/admin/payments`
 
 - **Query:** `?status=created|paid|refunded&cursor=&limit=`
-- **Response 200:** `{ "items": [ { "id": "uuid", "razorpay_order_id": "...", "razorpay_payment_id": "...", "amount_paise": 29900, "status": "paid", "created_at": "..." } ], "next_cursor": null }`
+- **Response 200:** `{ "items": [ { "id": "uuid", "razorpay_order_id": "...", "razorpay_payment_id": "...", "amount_paise": "<orders.amount>", "status": "paid", "created_at": "..." } ], "next_cursor": null }`
 - **Errors:** `401`, `403`, `429`.
 
 #### `GET /api/admin/payments/:id`
@@ -560,7 +557,7 @@ All admin endpoints: **Auth: admin** `[PROPOSAL — role mechanism unspecified i
 
 `amount_paise: null` = full refund; a value = partial refund `[PROPOSAL — PRD does not mention partial refunds]`.
 
-- **Response 201:** `{ "refund": { "id": "uuid", "razorpay_refund_id": "rfnd_xxxxx", "amount_paise": 29900, "status": "processed", "created_at": "..." } }`
+- **Response 201:** `{ "refund": { "id": "uuid", "razorpay_refund_id": "rfnd_xxxxx", "amount_paise": "<payments.amount>", "status": "processed", "created_at": "..." } }`
 - **Errors:** `401`, `403`, `404 not_found`, `409 already_refunded`, `422 not_refundable`, `502 razorpay_error` `[PROPOSAL]`.
 
 #### `GET /api/admin/scans` (scan logs — PRD §7.7)
